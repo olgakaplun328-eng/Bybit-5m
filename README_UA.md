@@ -1,16 +1,16 @@
-# ETHUSDT MEXC Futures 5m Signal Bot v11
+# BTCUSDT + ETHUSDT MEXC 5m Telegram Bot v4
 
-## Алгоритм
-- START — зелена свічка, яка є останньою у своєму зеленому ряді.
-- #6, #7 і #8 мають бути червоними.
-- PRE-ALERT надсилається лише протягом останньої хвилини формування #8, якщо #6 і #7 вже червоні та поточна #8 теж червона.
-- Після повного закриття #8 надсилається SIGNAL LONG.
-- На свічках #9–#15 хоча б одна зелена свічка означає WIN; якщо всі сім червоні — LOSS.
+REST-only bot for MEXC ETH_USDT Futures.
 
-Джерело даних: MEXC Futures, нативні 5-хвилинні свічки. Сигнали лише інформаційні; автоматичні ордери не виставляються.
+- Polls public MEXC 1m candles every 15 seconds.
+- Builds closed 5m candles locally.
+- Uses the agreed signal rule: last candle of a green/red run, then 6 subsequent candles; opposite color on candle 6 triggers LONG/SHORT.
+- Candle #6 is the trigger; candles #7-#8 must remain the trigger color; candles #9-#15 decide WIN/LOSS. WIN occurs on any #9-#15 candle matching Start color; LOSS is sent only after #15 closes if none match.
+- **On startup it seeds history without sending old historical signals.**
+- Telegram messages use plain UTF-8 text without emoji, avoiding mojibake such as `â`.
 
-## Railway Variables
-- `TELEGRAM_BOT_TOKEN`
-- `TELEGRAM_CHAT_ID` — два chat ID через кому
-- `MEXC_SYMBOL=ETH_USDT`
-- `POLL_SECONDS=15`
+Railway variables remain unchanged:
+`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `MEXC_SYMBOL`, `POLL_SECONDS`, `STATE_FILE`.
+
+
+Оновлення: у групі рядок "Trigger: candle 6" приховано; у приватному чаті він залишається.
