@@ -50,20 +50,36 @@ def tg(text, group_text=None):
         return False
     sent=0
     for chat_id in CHAT_IDS:
-        try:
-            send_text = group_text if (group_text is not None and chat_id.startswith('-')) else text
-            r=requests.post(
-                f'https://api.telegram.org/bot{TOKEN}/sendMessage',
-                json={'chat_id': chat_id, 'text': send_text},
-                timeout=15
-            )
-            if r.ok and r.json().get('ok'):
-                sent += 1
-                log.info('TELEGRAM SENT OK | chat=%s', chat_id)
-            else:
+        send_text = group_text if (group_text is not None and chat_id.startswith('-')) else text
+        delivered=False
+        for attempt in range(2):
+            try:
+                r=requests.post(
+                    f'https://api.telegram.org/bot{TOKEN}/sendMessage',
+                    json={'chat_id': chat_id, 'text': send_text},
+                    timeout=15
+                )
+                if r.ok and r.json().get('ok'):
+                    sent += 1
+                    delivered=True
+                    log.info('TELEGRAM SENT OK | chat=%s', chat_id)
+                    break
+                if r.status_code == 429 and attempt == 0:
+                    try:
+                        retry_after=max(1, int(r.json().get('parameters', {}).get('retry_after', 10)))
+                    except Exception:
+                        retry_after=10
+                    log.warning('TELEGRAM RATE LIMIT | chat=%s | retry_after=%ss', chat_id, retry_after)
+                    time.sleep(retry_after)
+                    continue
                 log.error('TELEGRAM ERROR | chat=%s | status=%s body=%s', chat_id, r.status_code, r.text[:300])
-        except Exception as e:
-            log.exception('TELEGRAM EXCEPTION | chat=%s: %s', chat_id, e)
+                break
+            except Exception as e:
+                log.exception('TELEGRAM EXCEPTION | chat=%s: %s', chat_id, e)
+                break
+        if not delivered:
+            continue
+        time.sleep(1.0)
     return sent == len(CHAT_IDS)
 
 def fetch():
