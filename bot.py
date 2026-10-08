@@ -158,6 +158,7 @@ class Engine:
         self.pending=[]
         self.initialized=False
         self.pre_alerted=set()
+        self.startup_ts=None
 
     def seed(self, closed):
         """Load current history without generating historical signals/results."""
@@ -166,6 +167,7 @@ class Engine:
         self.pending=[]
         self.state['pending']=[]
         self.state['last_processed_5m']=next(reversed(self.c)) if self.c else None
+        self.startup_ts=next(reversed(self.c)) if self.c else None
         save_state(self.state)
         self.initialized=True
         if self.c:
@@ -229,7 +231,10 @@ class Engine:
         # This prevents a batch of >150 unseen candles from removing an
         # earlier new candle and causing keys.index(ts) to fail.
         for x in new:
-            self.evaluate(x['ts'])
+            # Never evaluate candles that belong to the startup history window.
+            # Only candles that arrived after the initial seed may create signals.
+            if self.startup_ts is None or x['ts'] > self.startup_ts:
+                self.evaluate(x['ts'])
         while len(self.c)>150:
             self.c.popitem(last=False)
         if new:
