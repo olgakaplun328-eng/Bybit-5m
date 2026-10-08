@@ -62,8 +62,8 @@ def tg(text, group_text=None):
 def fetch():
     r=requests.get(
         URL,
-        params={'interval':'Min1', 'limit':300, '_ts':int(time.time()*1000)},
-        headers={'Cache-Control':'no-cache', 'Pragma':'no-cache', 'User-Agent':'ETHUSDT-5m-Signal-Bot/4.0'},
+        params={'interval':'Min5', 'limit':300, '_ts':int(time.time()*1000)},
+        headers={'Cache-Control':'no-cache', 'Pragma':'no-cache', 'User-Agent':'ETHUSDT-5m-Signal-Bot/5.0'},
         timeout=15
     )
     r.raise_for_status()
@@ -87,28 +87,18 @@ def fetch():
     out.sort(key=lambda x:x['ts'])
     return out
 
-def current_5m(mins):
-    """Build the currently forming 5m candle from 1m data."""
-    if not mins:
+def current_5m(candles):
+    """Return the native, currently forming MEXC 5m candle (not built from 1m)."""
+    if not candles:
         return None
-    b=(mins[-1]['ts']//300)*300
-    rows=[x for x in mins if (x['ts']//300)*300==b]
-    if not rows:
-        return None
-    rows.sort(key=lambda x:x['ts'])
-    return {'ts':b, 'open':rows[0]['open'], 'close':rows[-1]['close'], 'count':len(rows)}
-
-def agg(mins):
-    buckets=OrderedDict()
-    for c in mins:
-        b=(c['ts']//300)*300
-        buckets.setdefault(b,[]).append(c)
     now=int(time.time())
-    out=[]
-    for b,rows in buckets.items():
-        if b+300<=now and len(rows)>=4:
-            out.append({'ts':b, 'open':rows[0]['open'], 'close':rows[-1]['close'], 'count':len(rows)})
-    return out
+    live=[c for c in candles if c['ts'] <= now < c['ts']+300]
+    return live[-1] if live else None
+
+def agg(candles):
+    """Return native MEXC 5m candles that have fully closed."""
+    now=int(time.time())
+    return [dict(c) for c in candles if c['ts']+300 <= now]
 
 class Engine:
     def __init__(self, state):
@@ -254,28 +244,28 @@ state=load_state()
 engine=Engine(state)
 
 def main():
-    log.info('Started ETH_USDT 5m signal bot v4-fixed (REST polling)')
+    log.info('Started ETH_USDT 5m signal bot v5-native-5m (MEXC REST)')
     log.info('Config: poll=%ss, chats=%d, token_configured=%s', POLL, len(CHAT_IDS), bool(TOKEN))
     if TOKEN and CHAT_IDS:
         tg('BOT ONLINE\nETHUSDT Futures\nSignal bot is active.\nThis test confirms Telegram delivery to all configured chats.')
     last_log=0
     while True:
         try:
-            mins=fetch()
-            live10=current_5m(mins)
-            if live10:
-                engine.maybe_pre_alert(live10)
-            closed=agg(mins)
+            candles=fetch()
+            live5=current_5m(candles)
+            if live5:
+                engine.maybe_pre_alert(live5)
+            closed=agg(candles)
             if not closed:
-                log.warning('MEXC OK but no closed 5m candles yet')
+                log.warning('MEXC OK but no closed native 5m candles yet')
             else:
                 latest=closed[-1]
                 n=engine.ingest_new(closed)
                 if n:
-                    log.info('NEW DATA | MEXC 1m=%d | closed_5m=%d | added=%d | latest=%s %s | O=%.4f C=%.4f | pending=%d', len(mins), len(closed), n, utc(latest['ts']), color(latest), latest['open'], latest['close'], len(engine.pending))
+                    log.info('NEW DATA | MEXC native_5m=%d | closed_5m=%d | added=%d | latest=%s %s | O=%.4f C=%.4f | pending=%d', len(candles), len(closed), n, utc(latest['ts']), color(latest), latest['open'], latest['close'], len(engine.pending))
                 elif time.time()-last_log>=60:
                     age=int(time.time()-(latest['ts']+300))
-                    log.info('HEARTBEAT OK | MEXC 1m=%d | closed_5m=%d | latest=%s %s | age=%ss | pending=%d', len(mins), len(closed), utc(latest['ts']), color(latest), max(age,0), len(engine.pending))
+                    log.info('HEARTBEAT OK | MEXC native_5m=%d | closed_5m=%d | latest=%s %s | age=%ss | pending=%d', len(candles), len(closed), utc(latest['ts']), color(latest), max(age,0), len(engine.pending))
                     last_log=time.time()
         except Exception as e:
             log.exception('LOOP ERROR: %s', e)

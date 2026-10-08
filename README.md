@@ -3,7 +3,7 @@
 Signal-only Telegram bot for MEXC Futures using BTCUSDT and ETHUSDT.
 
 ## Logic
-- Build closed 5m candles from 5m candles.
+- Fetches native MEXC Futures 5m candles directly (interval=Min5); does not construct them from 1m candles.
 - Start candle is the last candle of its same-color run.
 - #6 must be the opposite color of Start.
 - #7, #8, #9 must match #6.

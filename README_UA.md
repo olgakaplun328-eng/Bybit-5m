@@ -2,8 +2,8 @@
 
 REST-only bot for MEXC ETH_USDT Futures.
 
-- Polls public MEXC 1m candles every 15 seconds.
-- Builds closed 5m candles locally.
+- Polls native public MEXC Futures 5m candles every 15 seconds (interval=Min5).
+- Uses MEXC native 5m OHLC candles directly; does not reconstruct 5m candles from 1m data.
 - Uses the agreed signal rule: last candle of a green/red run, then 6 subsequent candles; opposite color on candle 6 triggers LONG/SHORT.
 - Candle #6 is the trigger; candles #7-#8 must remain the trigger color; candles #9-#15 decide WIN/LOSS. WIN occurs on any #9-#15 candle matching Start color; LOSS is sent only after #15 closes if none match.
 - **On startup it seeds history without sending old historical signals.**
