@@ -11,7 +11,10 @@ CHAT_IDS=[x.strip() for x in os.getenv('TELEGRAM_CHAT_ID','').split(',') if x.st
 SYMBOL=os.getenv('MEXC_SYMBOL','ETH_USDT').strip().upper()
 POLL=int(os.getenv('POLL_SECONDS','15'))
 STATE_FILE=os.getenv('STATE_FILE','state.json')
-URL=f'https://api.mexc.com/api/v1/contract/kline/{SYMBOL}'
+FUTURES_URL=f'https://api.mexc.com/api/v1/contract/kline/{SYMBOL}'
+SPOT_SYMBOL=SYMBOL.replace('_','')
+SPOT_URL='https://api.mexc.com/api/v3/klines'
+DATA_SOURCE='FUTURES'
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(levelname)s | %(message)s')
 log=logging.getLogger('eth-bot')
@@ -60,32 +63,61 @@ def tg(text, group_text=None):
     return sent == len(CHAT_IDS)
 
 def fetch():
+    global DATA_SOURCE
     now=int(time.time())
     start=now-(300*5*60)
+    headers={'Cache-Control':'no-cache', 'Pragma':'no-cache', 'User-Agent':'Mozilla/5.0 (compatible; ETHUSDT-5m-Signal-Bot/5.2)'}
+
+    # First try the native MEXC Futures 5m endpoint. If MEXC returns
+    # code 1001 for the futures contract, fall back to MEXC Spot 5m data.
+    # The signal engine itself is unchanged.
     r=requests.get(
-        URL,
+        FUTURES_URL,
         params={'interval':'Min5', 'start':start, 'end':now},
-        headers={'Cache-Control':'no-cache', 'Pragma':'no-cache', 'User-Agent':'Mozilla/5.0 (compatible; ETHUSDT-5m-Signal-Bot/5.1)'},
+        headers=headers,
         timeout=15
     )
     r.raise_for_status()
     p=r.json()
     data=p.get('data')
+    if not data and p.get('code') == 1001:
+        if DATA_SOURCE != 'SPOT':
+            log.warning('MEXC Futures unavailable for %s (code 1001); switching to MEXC Spot 5m candles for %s', SYMBOL, SPOT_SYMBOL)
+        DATA_SOURCE='SPOT'
+        r=requests.get(
+            SPOT_URL,
+            params={'symbol':SPOT_SYMBOL, 'interval':'5m', 'limit':300},
+            headers=headers,
+            timeout=15
+        )
+        r.raise_for_status()
+        p=r.json()
+        data=p
+    elif data:
+        DATA_SOURCE='FUTURES'
+
     if not data:
         raise RuntimeError(f'MEXC empty response: {p}')
+
     out=[]
-    if isinstance(data, dict) and isinstance(data.get('time'), list):
-        times=data['time']; opens=data.get('open',[]); closes=data.get('close',[])
-        for i,t in enumerate(times):
-            out.append({'ts':int(t), 'open':float(opens[i]), 'close':float(closes[i])})
-    elif isinstance(data, list):
-        for row in data:
-            if isinstance(row, dict):
-                out.append({'ts':int(row.get('time',row.get('t'))), 'open':float(row.get('open',row.get('o'))), 'close':float(row.get('close',row.get('c')))})
-            else:
-                out.append({'ts':int(row[0]), 'open':float(row[1]), 'close':float(row[2])})
+    if DATA_SOURCE == 'FUTURES':
+        if isinstance(data, dict) and isinstance(data.get('time'), list):
+            times=data['time']; opens=data.get('open',[]); closes=data.get('close',[])
+            for i,t in enumerate(times):
+                out.append({'ts':int(t), 'open':float(opens[i]), 'close':float(closes[i])})
+        elif isinstance(data, list):
+            for row in data:
+                if isinstance(row, dict):
+                    out.append({'ts':int(row.get('time',row.get('t'))), 'open':float(row.get('open',row.get('o'))), 'close':float(row.get('close',row.get('c')))})
+                else:
+                    out.append({'ts':int(row[0]), 'open':float(row[1]), 'close':float(row[4] if len(row) > 4 else row[2])})
     else:
-        raise RuntimeError(f'Unknown MEXC data format: {type(data).__name__}')
+        # Spot V3 kline rows: [open_time, open, high, low, close, volume, ...]
+        if not isinstance(data, list):
+            raise RuntimeError(f'Unknown MEXC Spot data format: {type(data).__name__}')
+        for row in data:
+            out.append({'ts':int(row[0])//1000, 'open':float(row[1]), 'close':float(row[4])})
+
     out.sort(key=lambda x:x['ts'])
     return out
 
@@ -243,7 +275,7 @@ state=load_state()
 engine=Engine(state)
 
 def main():
-    log.info('Started ETH_USDT 5m signal bot v4-fixed (REST polling)')
+    log.info('Started ETH_USDT 5m signal bot v4-fixed (MEXC REST)')
     log.info('Config: poll=%ss, chats=%d, token_configured=%s', POLL, len(CHAT_IDS), bool(TOKEN))
     if TOKEN and CHAT_IDS:
         tg('BOT ONLINE\nETHUSDT Futures\nSignal bot is active.\nThis test confirms Telegram delivery to all configured chats.')
@@ -261,10 +293,10 @@ def main():
                 latest=closed[-1]
                 n=engine.ingest_new(closed)
                 if n:
-                    log.info('NEW DATA | MEXC 5m=%d | closed_5m=%d | added=%d | latest=%s %s | O=%.4f C=%.4f | pending=%d', len(mins), len(closed), n, utc(latest['ts']), color(latest), latest['open'], latest['close'], len(engine.pending))
+                    log.info('NEW DATA | MEXC %s 5m=%d | closed_5m=%d | added=%d | latest=%s %s | O=%.4f C=%.4f | pending=%d', DATA_SOURCE, len(mins), len(closed), n, utc(latest['ts']), color(latest), latest['open'], latest['close'], len(engine.pending))
                 elif time.time()-last_log>=60:
                     age=int(time.time()-(latest['ts']+300))
-                    log.info('HEARTBEAT OK | MEXC 5m=%d | closed_5m=%d | latest=%s %s | age=%ss | pending=%d', len(mins), len(closed), utc(latest['ts']), color(latest), max(age,0), len(engine.pending))
+                    log.info('HEARTBEAT OK | MEXC %s 5m=%d | closed_5m=%d | latest=%s %s | age=%ss | pending=%d', DATA_SOURCE, len(mins), len(closed), utc(latest['ts']), color(latest), max(age,0), len(engine.pending))
                     last_log=time.time()
         except Exception as e:
             log.exception('LOOP ERROR: %s', e)
