@@ -1,9 +1,16 @@
-# BTCUSDT + ETHUSDT MEXC 5m Telegram Bot
+# BTCUSDT + ETHUSDT MEXC 5m Telegram Bot v4
 
-BTCUSDT + ETHUSDT signal bot. The candle timeframe is 5m.
+REST-only bot for MEXC ETH_USDT Futures.
 
-Railway variables:
-`TELEGRAM_BOT_TOKEN`, `CHAT_ID` (fallback `TELEGRAM_CHAT_ID`),
-`SCAN_SECONDS=30`, `LEVERAGE=30`, `PRE_MIN_SECONDS=90`, `PRE_MAX_SECONDS=150`.
+- Polls public MEXC 1m candles every 15 seconds.
+- Builds closed 5m candles locally.
+- Uses the agreed signal rule: last candle of a green/red run, then 6 subsequent candles; opposite color on candle 6 triggers LONG/SHORT.
+- Candle #6 is the trigger; candles #7-#8 must remain the trigger color; candles #9-#15 decide WIN/LOSS. WIN occurs on any #9-#15 candle matching Start color; LOSS is sent only after #15 closes if none match.
+- **On startup it seeds history without sending old historical signals.**
+- Telegram messages use plain UTF-8 text without emoji, avoiding mojibake such as `â`.
 
-No automatic trading. Public MEXC market data only.
+Railway variables remain unchanged:
+`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `MEXC_SYMBOL`, `POLL_SECONDS`, `STATE_FILE`.
+
+
+Оновлення: у групі рядок "Trigger: candle 6" приховано; у приватному чаті він залишається.
