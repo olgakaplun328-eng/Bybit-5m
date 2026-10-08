@@ -1,4 +1,4 @@
-# BTCUSDT + ETHUSDT MEXC 5m Telegram Bot v4
+# BTCUSDT + ETHUSDT і BTCUSDT MEXC 5m Telegram Bot v4
 
 REST-only bot for MEXC ETH_USDT Futures.
 

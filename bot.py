@@ -8,10 +8,10 @@ from dotenv import load_dotenv
 load_dotenv()
 TOKEN=os.getenv('TELEGRAM_BOT_TOKEN','').strip()
 CHAT_IDS=[x.strip() for x in os.getenv('TELEGRAM_CHAT_ID','').split(',') if x.strip()]
-SYMBOL=os.getenv('MEXC_SYMBOL','ETH_USDT').strip().upper()
+SYMBOLS=[x.strip().upper() for x in os.getenv('MEXC_SYMBOLS','ETH_USDT,BTC_USDT').split(',') if x.strip()]
 POLL=int(os.getenv('POLL_SECONDS','15'))
 STATE_FILE=os.getenv('STATE_FILE','state.json')
-URL=f'https://contract.mexc.com/api/v1/contract/kline/{SYMBOL}'
+URL='https://contract.mexc.com/api/v1/contract/kline/{symbol}'
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(levelname)s | %(message)s')
 log=logging.getLogger('eth-bot')
@@ -25,17 +25,19 @@ def kyiv(ts):
 def color(c):
     return 'GREEN' if c['close'] > c['open'] else 'RED' if c['close'] < c['open'] else 'DOJI'
 
-def load_state():
+def load_state(path=None):
+    path=path or STATE_FILE
     try:
-        with open(STATE_FILE, encoding='utf8') as f:
+        with open(path, encoding='utf8') as f:
             return json.load(f)
     except Exception:
         return {'last_processed_5m': None, 'pending': []}
 
-def save_state(s):
-    with open(STATE_FILE + '.tmp', 'w', encoding='utf8') as f:
+def save_state(s, path=None):
+    path=path or STATE_FILE
+    with open(path + '.tmp', 'w', encoding='utf8') as f:
         json.dump(s, f, indent=2)
-    os.replace(STATE_FILE + '.tmp', STATE_FILE)
+    os.replace(path + '.tmp', path)
 
 def tg(text, group_text=None):
     if not TOKEN or not CHAT_IDS:
@@ -59,9 +61,9 @@ def tg(text, group_text=None):
             log.exception('TELEGRAM EXCEPTION | chat=%s: %s', chat_id, e)
     return sent == len(CHAT_IDS)
 
-def fetch():
+def fetch(symbol):
     r=requests.get(
-        URL,
+        URL.format(symbol=symbol),
         params={'interval':'Min5', 'limit':300, '_ts':int(time.time()*1000)},
         headers={'Cache-Control':'no-cache', 'Pragma':'no-cache', 'User-Agent':'ETHUSDT-5m-Signal-Bot/5.0'},
         timeout=15
@@ -101,8 +103,10 @@ def agg(candles):
     return [dict(c) for c in candles if c['ts']+300 <= now]
 
 class Engine:
-    def __init__(self, state):
+    def __init__(self, state, symbol, state_file):
         self.state=state
+        self.symbol=symbol
+        self.state_file=state_file
         self.c=OrderedDict()
         self.pending=[]
         self.initialized=False
@@ -115,7 +119,7 @@ class Engine:
         self.pending=[]
         self.state['pending']=[]
         self.state['last_processed_5m']=next(reversed(self.c)) if self.c else None
-        save_state(self.state)
+        save_state(self.state, self.state_file)
         self.initialized=True
         if self.c:
             latest=next(reversed(self.c.values()))
@@ -156,9 +160,9 @@ class Engine:
             return
 
         log.info('PRE-SIGNAL | start=%s %s | live trigger=%s %s | ~2m left', utc(start['ts']), sc, utc(target_ts), trig)
-        group_text=('**Всі готові?**\n'
-                     '**Скоро дам СИГНАЛ!**\n\n'
-                     'ETHUSDT Futures\n'
+        group_text=(f'**Всі готові?**\n'
+                     f'**Скоро дам СИГНАЛ!**\n\n'
+                     f'{self.symbol.replace("_USDT","USDT")} Futures\n'
                      'Timeframe: 5m\n\n'
                      '⚠️ Сигнал буде тільки після закриття свічки.')
         # Pre-signal announcement is intended for the Telegram group only.
@@ -181,7 +185,7 @@ class Engine:
         if new:
             self.state['pending']=self.pending
             self.state['last_processed_5m']=new[-1]['ts']
-            save_state(self.state)
+            save_state(self.state, self.state_file)
         return len(new)
 
     def evaluate(self, ts):
@@ -199,10 +203,10 @@ class Engine:
             want='GREEN' if p['direction']=='LONG' else 'RED'
             if color(cur)==want:
                 log.info('RESULT WIN | %s | start=%s | control=%d', p['direction'], utc(p['start_ts']), rel)
-                tg(f'WIN\nETHUSDT Futures\nDirection: {p["direction"]}\nControl candle: {rel}/7\n\nТрейдер Василь Павлів\n@vasylpavliv\nhttps://t.me/vasylpavliv')
+                tg(f'WIN\n{self.symbol.replace("_USDT","USDT")} Futures\nDirection: {p["direction"]}\nControl candle: {rel}/7\n\nТрейдер Василь Павлів\n@vasylpavliv\nhttps://t.me/vasylpavliv')
             elif rel>=7:
                 log.info('RESULT LOSS | %s | start=%s', p['direction'], utc(p['start_ts']))
-                tg(f'LOSS\nETHUSDT Futures\nDirection: {p["direction"]}\nNo confirmation in candles 7-13\n\nТрейдер Василь Павлів\n@vasylpavliv\nhttps://t.me/vasylpavliv')
+                tg(f'LOSS\n{self.symbol.replace("_USDT","USDT")} Futures\nDirection: {p["direction"]}\nNo confirmation in candles 7-13\n\nТрейдер Василь Павлів\n@vasylpavliv\nhttps://t.me/vasylpavliv')
             else:
                 keep.append(p)
         self.pending=keep
@@ -235,40 +239,42 @@ class Engine:
         if any(p['start_ts']==start['ts'] for p in self.pending):
             return
         log.info('SIGNAL %s | start=%s %s | trigger=%s %s', direction, utc(start['ts']), sc, utc(ts), trig)
-        signal_text=(f'SIGNAL {direction}\n\nETHUSDT Futures\nTimeframe: 5m\nStart: {kyiv(start["ts"])} Kyiv time\nTrigger: candle 6\n\nSignal only - no automatic trading.\n\nТрейдер Василь Павлів\n@vasylpavliv\nhttps://t.me/vasylpavliv')
-        signal_group_text=(f'SIGNAL {direction}\n\nETHUSDT Futures\nTimeframe: 5m\nStart: {kyiv(start["ts"])} Kyiv time\n\nSignal only - no automatic trading.\n\nТрейдер Василь Павлів\n@vasylpavliv\nhttps://t.me/vasylpavliv')
+        signal_text=(f'SIGNAL {direction}\n\n{self.symbol.replace("_USDT","USDT")} Futures\nTimeframe: 5m\nStart: {kyiv(start["ts"])} Kyiv time\nTrigger: candle 6\n\nSignal only - no automatic trading.\n\nТрейдер Василь Павлів\n@vasylpavliv\nhttps://t.me/vasylpavliv')
+        signal_group_text=(f'SIGNAL {direction}\n\n{self.symbol.replace("_USDT","USDT")} Futures\nTimeframe: 5m\nStart: {kyiv(start["ts"])} Kyiv time\n\nSignal only - no automatic trading.\n\nТрейдер Василь Павлів\n@vasylpavliv\nhttps://t.me/vasylpavliv')
         tg(signal_text, signal_group_text)
         self.pending.append({'start_ts':start['ts'], 'trigger_idx':idx, 'direction':direction})
 
-state=load_state()
-engine=Engine(state)
-
 def main():
-    log.info('Started ETH_USDT 5m signal bot v5-native-5m (MEXC REST)')
+    engines={}
+    for symbol in SYMBOLS:
+        state_file=STATE_FILE.rsplit('.',1)[0] + '_' + symbol.replace('_','') + '.json' if '.' in STATE_FILE else STATE_FILE + '_' + symbol.replace('_','')
+        engines[symbol]=Engine(load_state(state_file), symbol, state_file)
+    log.info('Started MEXC native 5m signal bot v6 | symbols=%s', ','.join(SYMBOLS))
     log.info('Config: poll=%ss, chats=%d, token_configured=%s', POLL, len(CHAT_IDS), bool(TOKEN))
     if TOKEN and CHAT_IDS:
-        tg('BOT ONLINE\nETHUSDT Futures\nSignal bot is active.\nThis test confirms Telegram delivery to all configured chats.')
-    last_log=0
+        tg('BOT ONLINE\nETHUSDT + BTCUSDT Futures\nNative MEXC 5m candles\nSignal bot is active.')
+    last_log={symbol:0 for symbol in SYMBOLS}
     while True:
-        try:
-            candles=fetch()
-            live5=current_5m(candles)
-            if live5:
-                engine.maybe_pre_alert(live5)
-            closed=agg(candles)
-            if not closed:
-                log.warning('MEXC OK but no closed native 5m candles yet')
-            else:
-                latest=closed[-1]
-                n=engine.ingest_new(closed)
-                if n:
-                    log.info('NEW DATA | MEXC native_5m=%d | closed_5m=%d | added=%d | latest=%s %s | O=%.4f C=%.4f | pending=%d', len(candles), len(closed), n, utc(latest['ts']), color(latest), latest['open'], latest['close'], len(engine.pending))
-                elif time.time()-last_log>=60:
-                    age=int(time.time()-(latest['ts']+300))
-                    log.info('HEARTBEAT OK | MEXC native_5m=%d | closed_5m=%d | latest=%s %s | age=%ss | pending=%d', len(candles), len(closed), utc(latest['ts']), color(latest), max(age,0), len(engine.pending))
-                    last_log=time.time()
-        except Exception as e:
-            log.exception('LOOP ERROR: %s', e)
+        for symbol, engine in engines.items():
+            try:
+                candles=fetch(symbol)
+                live5=current_5m(candles)
+                if live5:
+                    engine.maybe_pre_alert(live5)
+                closed=agg(candles)
+                if not closed:
+                    log.warning('MEXC OK but no closed native 5m candles yet | symbol=%s', symbol)
+                else:
+                    latest=closed[-1]
+                    n=engine.ingest_new(closed)
+                    if n:
+                        log.info('NEW DATA | symbol=%s | MEXC native_5m=%d | closed_5m=%d | added=%d | latest=%s %s | O=%.4f C=%.4f | pending=%d', symbol, len(candles), len(closed), n, utc(latest['ts']), color(latest), latest['open'], latest['close'], len(engine.pending))
+                    elif time.time()-last_log[symbol]>=60:
+                        age=int(time.time()-(latest['ts']+300))
+                        log.info('HEARTBEAT OK | symbol=%s | MEXC native_5m=%d | closed_5m=%d | latest=%s %s | age=%ss | pending=%d', symbol, len(candles), len(closed), utc(latest['ts']), color(latest), max(age,0), len(engine.pending))
+                        last_log[symbol]=time.time()
+            except Exception as e:
+                log.exception('LOOP ERROR | symbol=%s: %s', symbol, e)
         time.sleep(POLL)
 
 if __name__=='__main__':
