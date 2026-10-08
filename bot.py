@@ -159,6 +159,7 @@ class Engine:
         self.initialized=False
         self.pre_alerted=set()
         self.startup_ts=None
+        self.sent_signals=set(self.state.get('sent_signals', []))
 
     def seed(self, closed):
         """Load current history without generating historical signals/results."""
@@ -168,6 +169,8 @@ class Engine:
         self.state['pending']=[]
         self.state['last_processed_5m']=next(reversed(self.c)) if self.c else None
         self.startup_ts=next(reversed(self.c)) if self.c else None
+        # Keep sent-signal deduplication across restarts.
+        self.sent_signals=set(self.state.get('sent_signals', []))
         save_state(self.state)
         self.initialized=True
         if self.c:
@@ -222,8 +225,12 @@ class Engine:
         if not self.initialized:
             self.seed(closed)
             return 0
-        known=set(self.c)
-        new=[x for x in closed if x['ts'] not in known]
+        # MEXC returns a rolling history on every poll. The engine keeps only
+        # the latest 150 candles, so comparing against all returned timestamps
+        # would re-add ~149 old candles every 15 seconds. Only ingest candles
+        # strictly newer than the newest candle already stored.
+        last_ts=next(reversed(self.c)) if self.c else None
+        new=[x for x in closed if last_ts is None or x['ts'] > last_ts]
         for x in new:
             self.c[x['ts']]=x
         self.c=OrderedDict(sorted(self.c.items()))
@@ -293,6 +300,13 @@ class Engine:
             return
         if any(p['start_ts']==start['ts'] for p in self.pending):
             return
+        # Hard deduplication: one signal per trigger candle, even after
+        # pending resolves or the process restarts.
+        if ts in self.sent_signals:
+            return
+        self.sent_signals.add(ts)
+        self.state['sent_signals']=sorted(self.sent_signals)[-300:]
+        save_state(self.state)
         log.info('SIGNAL %s | start=%s %s | trigger=%s %s', direction, utc(start['ts']), sc, utc(ts), trig)
         signal_text=(f'SIGNAL {direction}\n\n{SPOT_SYMBOL} Futures\nTimeframe: 5m\nStart: {kyiv(start["ts"])} Kyiv time\nTrigger: candle 6\n\nSignal only - no automatic trading.\n\nТрейдер Василь Павлів\n@vasylpavliv\nhttps://t.me/vasylpavliv')
         signal_group_text=(f'SIGNAL {direction}\n\n{SPOT_SYMBOL} Futures\nTimeframe: 5m\nStart: {kyiv(start["ts"])} Kyiv time\n\nSignal only - no automatic trading.\n\nТрейдер Василь Павлів\n@vasylpavliv\nhttps://t.me/vasylpavliv')
