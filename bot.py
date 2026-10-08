@@ -60,11 +60,11 @@ def tg(text, group_text=None):
     return sent == len(CHAT_IDS)
 
 def fetch():
-    now_ms=int(time.time()*1000)
-    start_ms=now_ms-(300*5*60*1000)
+    now=int(time.time())
+    start=now-(300*5*60)
     r=requests.get(
         URL,
-        params={'interval':'Min5', 'start':start_ms, 'end':now_ms},
+        params={'interval':'Min5', 'start':start, 'end':now},
         headers={'Cache-Control':'no-cache', 'Pragma':'no-cache', 'User-Agent':'Mozilla/5.0 (compatible; ETHUSDT-5m-Signal-Bot/5.1)'},
         timeout=15
     )
