@@ -182,46 +182,42 @@ class Engine:
             log.info('INITIALIZED | history=%d | latest=%s %s | waiting for NEW 5m candle', len(self.c), utc(latest['ts']), color(latest))
 
     def maybe_pre_alert(self, live10):
-        """At ~2 minutes before trigger close, warn when the live trigger is opposite the start."""
+        """Send group pre-alert during the final minute of candle #8, if #6-#8 are red."""
         if not self.initialized or not live10:
             return
-        # Only send during the final ~2 minutes of the current 5m candle.
         now=time.time()
         elapsed=now-live10['ts']
-        if elapsed < 180 or elapsed >= 300:
+        # User's rule: PRE-ALERT only in the final minute before candle #8 closes.
+        if elapsed < 240 or elapsed >= 300:
             return
 
-        keys=list(self.c)
-        # Need the five prior closed candles plus the start candle; trigger is live.
-        # Current live candle is candle #9 overall (8th subsequent) after the candidate start.
         target_ts=live10['ts']
-        if target_ts in self.c:
+        if target_ts in self.c or target_ts in self.pre_alerted:
             return
-        s_ts=target_ts-8*300
-        if s_ts not in self.c:
+        start_ts=target_ts-8*300
+        if start_ts not in self.c:
             return
-        sidx=keys.index(s_ts)
-        start=self.c[s_ts]
-        sc=color(start)
-        if sc not in ('GREEN','RED'):
+        keys=list(self.c)
+        sidx=keys.index(start_ts)
+        start=self.c[start_ts]
+        # START is green and must be the last candle of its green run.
+        if color(start) != 'GREEN':
             return
-        # Start must be the last candle of its same-color run.
-        if sidx+1 < len(keys) and color(self.c[keys[sidx+1]]) == sc:
+        if sidx+1 < len(keys) and color(self.c[keys[sidx+1]]) == 'GREEN':
+            return
+        # #6 and #7 are closed; live candle is #8. All three must be red.
+        if sidx+7 >= len(keys):
+            return
+        if color(self.c[keys[sidx+6]]) != 'RED' or color(self.c[keys[sidx+7]]) != 'RED' or color(live10) != 'RED':
             return
 
-        trig=color(live10)
-        if trig not in ('GREEN','RED') or trig == sc:
-            return
-        if target_ts in self.pre_alerted:
-            return
-
-        log.info('PRE-SIGNAL | start=%s %s | live trigger=%s %s | ~2m left', utc(start['ts']), sc, utc(target_ts), trig)
+        log.info('PRE-SIGNAL | start=%s GREEN | #6=%s RED | #7=%s RED | live #8=%s RED | final minute',
+                 utc(start['ts']), utc(self.c[keys[sidx+6]]['ts']), utc(self.c[keys[sidx+7]]['ts']), utc(target_ts))
         group_text=('**Всі готові?**\n'
-                     '**Скоро дам СИГНАЛ!**\n\n'
-                     f'{SPOT_SYMBOL} Futures\n'
-                     'Timeframe: 5m\n\n'
-                     '⚠️ Сигнал буде тільки після закриття свічки.')
-        # Pre-signal announcement is intended for the Telegram group only.
+                    '**Скоро дам СИГНАЛ LONG!**\n\n'
+                    f'{SPOT_SYMBOL} Futures\n'
+                    'Timeframe: 5m\n\n'
+                    '⚠️ Сигнал буде тільки після повного закриття свічки #8.')
         tg('', group_text)
         self.pre_alerted.add(target_ts)
 
@@ -277,43 +273,38 @@ class Engine:
                 keep.append(p)
         self.pending=keep
 
-        # Start can be either:
-        #   1) an isolated GREEN/RED candle, or
-        #   2) the LAST candle of a consecutive run of the same color.
-        #
-        # Trigger is exactly the 8th subsequent candle (9th candle including Start). The first seven
-        # subsequent candles may be ANY color (except that a DOJI is not
-        # GREEN/RED). Only candle #6 determines the signal direction.
+        # Exact user-defined sequence on native 5m candles:
+        # START must be GREEN and the last candle of its green run.
+        # #6 is the RED trigger; #7 and #8 must also be RED.
+        # Signal LONG only after #8 has fully closed.
+        # Candles #9..#15: any GREEN => WIN; seven RED candles => LOSS.
         if idx<8:
             return
         sidx=idx-8
         start=self.c[keys[sidx]]
-        sc=color(start)
-        if sc not in ('GREEN','RED'):
+        if color(start) != 'GREEN':
+            return
+        if sidx+1 < len(keys) and color(self.c[keys[sidx+1]]) == 'GREEN':
             return
 
-        # If the next candle has the same color, this is NOT the last candle
-        # of the run, so this candidate start is ignored. If the next candle
-        # is opposite color or DOJI, this candle IS the last one of its run.
-        if sidx+1 < len(keys) and color(self.c[keys[sidx+1]]) == sc:
-            return
-
-        trig=color(self.c[keys[idx]])
-        direction='LONG' if sc=='GREEN' and trig=='RED' else 'SHORT' if sc=='RED' and trig=='GREEN' else None
-        if not direction:
+        c6=self.c[keys[sidx+6]]
+        c7=self.c[keys[sidx+7]]
+        c8=self.c[keys[sidx+8]]
+        if color(c6) != 'RED' or color(c7) != 'RED' or color(c8) != 'RED':
             return
         if any(p['start_ts']==start['ts'] for p in self.pending):
             return
-        # Hard deduplication: one signal per trigger candle, even after
-        # pending resolves or the process restarts.
+        # Hard deduplication: one signal per #8 close, including restarts.
         if ts in self.sent_signals:
             return
         self.sent_signals.add(ts)
         self.state['sent_signals']=sorted(self.sent_signals)[-300:]
         save_state(self.state)
-        log.info('SIGNAL %s | start=%s %s | trigger=%s %s', direction, utc(start['ts']), sc, utc(ts), trig)
-        signal_text=(f'SIGNAL {direction}\n\n{SPOT_SYMBOL} Futures\nTimeframe: 5m\nStart: {kyiv(start["ts"])} Kyiv time\nTrigger: candle 9\n\nSignal only - no automatic trading.\n\nТрейдер Василь Павлів\n@vasylpavliv\nhttps://t.me/vasylpavliv')
-        signal_group_text=(f'SIGNAL {direction}\n\n{SPOT_SYMBOL} Futures\nTimeframe: 5m\nStart: {kyiv(start["ts"])} Kyiv time\n\nSignal only - no automatic trading.\n\nТрейдер Василь Павлів\n@vasylpavliv\nhttps://t.me/vasylpavliv')
+        direction='LONG'
+        log.info('SIGNAL LONG | start=%s GREEN | #6=%s RED | #7=%s RED | #8=%s RED (closed)',
+                 utc(start['ts']), utc(c6['ts']), utc(c7['ts']), utc(c8['ts']))
+        signal_text=(f'SIGNAL LONG\n\n{SPOT_SYMBOL} Futures\nTimeframe: 5m\nStart: {kyiv(start["ts"])} Kyiv time\n#6: {kyiv(c6["ts"])} RED\n#7: {kyiv(c7["ts"])} RED\n#8: {kyiv(c8["ts"])} RED (closed)\n\nSignal only - no automatic trading.\n\nТрейдер Василь Павлів\n@vasylpavliv\nhttps://t.me/vasylpavliv')
+        signal_group_text=(f'SIGNAL LONG\n\n{SPOT_SYMBOL} Futures\nTimeframe: 5m\nStart: {kyiv(start["ts"])} Kyiv time\n#6/#7/#8: RED\n\nSignal only - no automatic trading.\n\nТрейдер Василь Павлів\n@vasylpavliv\nhttps://t.me/vasylpavliv')
         tg(signal_text, signal_group_text)
         self.pending.append({'start_ts':start['ts'], 'trigger_idx':idx, 'direction':direction})
 
@@ -321,7 +312,7 @@ state=load_state()
 engine=Engine(state)
 
 def main():
-    log.info('Started %s 5m signal bot v10-fixed (MEXC REST)', SYMBOL)
+    log.info('Started %s 5m signal bot v11-sequence (MEXC REST)', SYMBOL)
     log.info('Config: poll=%ss, chats=%d, token_configured=%s', POLL, len(CHAT_IDS), bool(TOKEN))
     if TOKEN and CHAT_IDS:
         tg(f'BOT ONLINE\n{SPOT_SYMBOL} Futures\nSignal bot is active.\nThis test confirms Telegram delivery to all configured chats.')

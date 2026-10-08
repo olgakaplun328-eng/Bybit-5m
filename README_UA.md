@@ -1,9 +1,16 @@
-# MEXC 5m Signal Bot — FIXED v4
+# ETHUSDT MEXC Futures 5m Signal Bot v11
 
-Виправлено проблему, коли `MEXC_SYMBOL` у Railway містить кілька символів через кому. Цей signal engine працює з одним символом, тому бере перший символ зі списку (наприклад, `ETH_USDT` з `ETH_USDT,BTC_USDT`). Логіку сигналів не змінено.
+## Алгоритм
+- START — зелена свічка, яка є останньою у своєму зеленому ряді.
+- #6, #7 і #8 мають бути червоними.
+- PRE-ALERT надсилається лише протягом останньої хвилини формування #8, якщо #6 і #7 вже червоні та поточна #8 теж червона.
+- Після повного закриття #8 надсилається SIGNAL LONG.
+- На свічках #9–#15 хоча б одна зелена свічка означає WIN; якщо всі сім червоні — LOSS.
 
-Railway Variables:
-- TELEGRAM_BOT_TOKEN=ваш_токен
-- TELEGRAM_CHAT_ID=7728565803,-5557760391
-- MEXC_SYMBOL=ETH_USDT
-- POLL_SECONDS=15
+Джерело даних: MEXC Futures, нативні 5-хвилинні свічки. Сигнали лише інформаційні; автоматичні ордери не виставляються.
+
+## Railway Variables
+- `TELEGRAM_BOT_TOKEN`
+- `TELEGRAM_CHAT_ID` — два chat ID через кому
+- `MEXC_SYMBOL=ETH_USDT`
+- `POLL_SECONDS=15`
