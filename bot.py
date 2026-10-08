@@ -7,11 +7,11 @@ from dotenv import load_dotenv
 
 load_dotenv()
 TOKEN=os.getenv('TELEGRAM_BOT_TOKEN','').strip()
-CHAT_IDS=[x.strip() for x in os.getenv('TELEGRAM_CHAT_ID','').split(',') if x.strip()]
-SYMBOL=os.getenv('MEXC_SYMBOL','ETH_USDT').strip().upper()
+CHAT_IDS=[x.strip() for x in os.getenv('TELEGRAM_CHAT_ID','7728565803,-5557760391').split(',') if x.strip()]
+SYMBOL=os.getenv('BYBIT_SYMBOL','ETHUSDT').strip().upper()
 POLL=int(os.getenv('POLL_SECONDS','15'))
 STATE_FILE=os.getenv('STATE_FILE','state.json')
-URL=f'https://api.mexc.com/api/v1/contract/kline/{SYMBOL}'
+URL='https://api.bybit.com/v5/market/kline'
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(levelname)s | %(message)s')
 log=logging.getLogger('eth-bot')
@@ -62,52 +62,43 @@ def tg(text, group_text=None):
 def fetch():
     r=requests.get(
         URL,
-        params={'interval':'Min5', 'limit':300, '_ts':int(time.time()*1000)},
-        headers={'Cache-Control':'no-cache', 'Pragma':'no-cache', 'User-Agent':'ETHUSDT-5m-Signal-Bot/4.0'},
+        params={'category':'linear', 'symbol':SYMBOL, 'interval':'5', 'limit':300},
+        headers={'Cache-Control':'no-cache', 'Pragma':'no-cache', 'User-Agent':'ETHUSDT-5m-Signal-Bot/1.0'},
         timeout=15
     )
     r.raise_for_status()
     p=r.json()
-    data=p.get('data')
+    if p.get('retCode') != 0:
+        raise RuntimeError(f'Bybit error: {p}')
+    data=p.get('result',{}).get('list')
     if not data:
-        raise RuntimeError(f'MEXC empty response: {p}')
+        raise RuntimeError(f'Bybit empty response: {p}')
     out=[]
-    if isinstance(data, dict) and isinstance(data.get('time'), list):
-        times=data['time']; opens=data.get('open',[]); closes=data.get('close',[])
-        for i,t in enumerate(times):
-            out.append({'ts':int(t), 'open':float(opens[i]), 'close':float(closes[i])})
-    elif isinstance(data, list):
-        for row in data:
-            if isinstance(row, dict):
-                out.append({'ts':int(row.get('time',row.get('t'))), 'open':float(row.get('open',row.get('o'))), 'close':float(row.get('close',row.get('c')))})
-            else:
-                out.append({'ts':int(row[0]), 'open':float(row[1]), 'close':float(row[2])})
-    else:
-        raise RuntimeError(f'Unknown MEXC data format: {type(data).__name__}')
+    for row in data:
+        if not isinstance(row, list) or len(row) < 5:
+            continue
+        out.append({'ts':int(row[0])//1000, 'open':float(row[1]), 'close':float(row[4])})
+    if not out:
+        raise RuntimeError('Bybit returned no usable 5m candles')
     out.sort(key=lambda x:x['ts'])
     return out
 
-def current_5m(mins):
-    """Build the currently forming 5m candle from 1m data."""
-    if not mins:
+def current_5m(candles):
+    """Return the currently forming Bybit 5m candle."""
+    if not candles:
         return None
-    b=(mins[-1]['ts']//300)*300
-    rows=[x for x in mins if (x['ts']//300)*300==b]
-    if not rows:
-        return None
-    rows.sort(key=lambda x:x['ts'])
-    return {'ts':b, 'open':rows[0]['open'], 'close':rows[-1]['close'], 'count':len(rows)}
+    return candles[-1]
 
-def agg(mins):
-    buckets=OrderedDict()
-    for c in mins:
-        b=(c['ts']//300)*300
-        buckets.setdefault(b,[]).append(c)
+def agg(candles):
+    """Return closed 5m candles from Bybit.
+
+    Bybit already supplies native 5m candles, so no local aggregation is needed.
+    """
     now=int(time.time())
     out=[]
-    for b,rows in buckets.items():
-        if b+300<=now and len(rows)>=9:
-            out.append({'ts':b, 'open':rows[0]['open'], 'close':rows[-1]['close'], 'count':len(rows)})
+    for c in candles:
+        if c['ts'] + 300 <= now:
+            out.append(c)
     return out
 
 class Engine:
@@ -131,20 +122,20 @@ class Engine:
             latest=next(reversed(self.c.values()))
             log.info('INITIALIZED | history=%d | latest=%s %s | waiting for NEW 5m candle', len(self.c), utc(latest['ts']), color(latest))
 
-    def maybe_pre_alert(self, live10):
+    def maybe_pre_alert(self, live5):
         """At ~2 minutes before trigger close, warn when the live trigger is opposite the start."""
-        if not self.initialized or not live10:
+        if not self.initialized or not live5:
             return
         # Only send during the final ~2 minutes of the current 5m candle.
         now=time.time()
-        elapsed=now-live10['ts']
-        if elapsed < 480 or elapsed >= 300:
+        elapsed=now-live5['ts']
+        if elapsed < 180 or elapsed >= 300:
             return
 
         keys=list(self.c)
         # Need the five prior closed candles plus the start candle; trigger is live.
         # Current live candle is candle #6 after the candidate start.
-        target_ts=live10['ts']
+        target_ts=live5['ts']
         if target_ts in self.c:
             return
         s_ts=target_ts-6*300
@@ -159,7 +150,7 @@ class Engine:
         if sidx+1 < len(keys) and color(self.c[keys[sidx+1]]) == sc:
             return
 
-        trig=color(live10)
+        trig=color(live5)
         if trig not in ('GREEN','RED') or trig == sc:
             return
         if target_ts in self.pre_alerted:
@@ -254,7 +245,7 @@ state=load_state()
 engine=Engine(state)
 
 def main():
-    log.info('Started ETH_USDT 5m signal bot v4-fixed (REST polling)')
+    log.info('Started ETHUSDT 5m signal bot v4-fixed (REST polling)')
     log.info('Config: poll=%ss, chats=%d, token_configured=%s', POLL, len(CHAT_IDS), bool(TOKEN))
     if TOKEN and CHAT_IDS:
         tg('BOT ONLINE\nETHUSDT Futures\nSignal bot is active.\nThis test confirms Telegram delivery to all configured chats.')
@@ -262,20 +253,20 @@ def main():
     while True:
         try:
             mins=fetch()
-            live10=current_5m(mins)
-            if live10:
-                engine.maybe_pre_alert(live10)
+            live5=current_5m(mins)
+            if live5:
+                engine.maybe_pre_alert(live5)
             closed=agg(mins)
             if not closed:
-                log.warning('MEXC OK but no closed 5m candles yet')
+                log.warning('Bybit OK but no closed 5m candles yet')
             else:
                 latest=closed[-1]
                 n=engine.ingest_new(closed)
                 if n:
-                    log.info('NEW DATA | MEXC 1m=%d | closed_5m=%d | added=%d | latest=%s %s | O=%.4f C=%.4f | pending=%d', len(mins), len(closed), n, utc(latest['ts']), color(latest), latest['open'], latest['close'], len(engine.pending))
+                    log.info('NEW DATA | Bybit 5m=%d | closed_5m=%d | added=%d | latest=%s %s | O=%.4f C=%.4f | pending=%d', len(mins), len(closed), n, utc(latest['ts']), color(latest), latest['open'], latest['close'], len(engine.pending))
                 elif time.time()-last_log>=60:
                     age=int(time.time()-(latest['ts']+300))
-                    log.info('HEARTBEAT OK | MEXC 1m=%d | closed_5m=%d | latest=%s %s | age=%ss | pending=%d', len(mins), len(closed), utc(latest['ts']), color(latest), max(age,0), len(engine.pending))
+                    log.info('HEARTBEAT OK | Bybit 5m=%d | closed_5m=%d | latest=%s %s | age=%ss | pending=%d', len(mins), len(closed), utc(latest['ts']), color(latest), max(age,0), len(engine.pending))
                     last_log=time.time()
         except Exception as e:
             log.exception('LOOP ERROR: %s', e)

@@ -1,16 +1,22 @@
-# BTCUSDT + ETHUSDT MEXC 5m Telegram Bot v4
+# ETHUSDT Bybit 5m Telegram Signal Bot
 
-REST-only bot for MEXC ETH_USDT Futures.
+Signal-only Telegram bot using public Bybit Futures market data.
 
-- Polls public MEXC 1m candles every 15 seconds.
-- Builds closed 5m candles locally.
-- Uses the agreed signal rule: last candle of a green/red run, then 6 subsequent candles; opposite color on candle 6 triggers LONG/SHORT.
-- Candle #6 is the trigger; candles #7-#8 must remain the trigger color; candles #9-#15 decide WIN/LOSS. WIN occurs on any #9-#15 candle matching Start color; LOSS is sent only after #15 closes if none match.
-- **On startup it seeds history without sending old historical signals.**
-- Telegram messages use plain UTF-8 text without emoji, avoiding mojibake such as `â`.
+## Важливо
+- Джерело свічок: **Bybit**
+- Таймфрейм: **5m**
+- API-ключі Bybit не потрібні
+- Автоматичні ордери не виконуються
+- Логіка сигналів у `bot.py` збережена; змінено лише джерело даних з MEXC на Bybit та перехід на нативні 5m свічки.
+- Telegram ID за замовчуванням: `7728565803,-5557760391`
 
-Railway variables remain unchanged:
-`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `MEXC_SYMBOL`, `POLL_SECONDS`, `STATE_FILE`.
+## Railway Variables
+```text
+TELEGRAM_BOT_TOKEN=ВАШ_ТОКЕН
+TELEGRAM_CHAT_ID=7728565803,-5557760391
+BYBIT_SYMBOL=ETHUSDT
+POLL_SECONDS=15
+STATE_FILE=state.json
+```
 
-
-Оновлення: у групі рядок "Trigger: candle 6" приховано; у приватному чаті він залишається.
+Після зміни токена/змінних зробіть Redeploy.
