@@ -173,8 +173,12 @@ class Engine:
         if not self.initialized:
             self.seed(closed)
             return 0
-        known=set(self.c)
-        new=[x for x in closed if x['ts'] not in known]
+        # The API returns a rolling window of historical closed candles on every poll.
+        # Since self.c keeps only the newest 150, membership alone would repeatedly
+        # re-add the older candles that fell outside that window. Only process candles
+        # newer than the newest timestamp already held in history.
+        last_ts=max(self.c) if self.c else 0
+        new=[x for x in closed if x['ts'] > last_ts]
         # Process each new candle while it is still present in history. Previously,
         # history was trimmed to 150 candles before evaluation, so older entries in
         # a multi-candle catch-up batch could be removed and keys.index(ts) crashed.
