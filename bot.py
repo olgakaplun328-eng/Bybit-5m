@@ -184,16 +184,16 @@ class Engine:
         # Only send during the final ~2 minutes of the current 5m candle.
         now=time.time()
         elapsed=now-live10['ts']
-        if elapsed < 480 or elapsed >= 600:
+        if elapsed < 180 or elapsed >= 300:
             return
 
         keys=list(self.c)
         # Need the five prior closed candles plus the start candle; trigger is live.
-        # Current live candle is candle #6 after the candidate start.
+        # Current live candle is candle #9 overall (8th subsequent) after the candidate start.
         target_ts=live10['ts']
         if target_ts in self.c:
             return
-        s_ts=target_ts-6*300
+        s_ts=target_ts-8*300
         if s_ts not in self.c:
             return
         sidx=keys.index(s_ts)
@@ -277,12 +277,12 @@ class Engine:
         #   1) an isolated GREEN/RED candle, or
         #   2) the LAST candle of a consecutive run of the same color.
         #
-        # Trigger is exactly the 6th subsequent candle. The first five
+        # Trigger is exactly the 8th subsequent candle (9th candle including Start). The first seven
         # subsequent candles may be ANY color (except that a DOJI is not
         # GREEN/RED). Only candle #6 determines the signal direction.
-        if idx<6:
+        if idx<8:
             return
-        sidx=idx-6
+        sidx=idx-8
         start=self.c[keys[sidx]]
         sc=color(start)
         if sc not in ('GREEN','RED'):
@@ -308,7 +308,7 @@ class Engine:
         self.state['sent_signals']=sorted(self.sent_signals)[-300:]
         save_state(self.state)
         log.info('SIGNAL %s | start=%s %s | trigger=%s %s', direction, utc(start['ts']), sc, utc(ts), trig)
-        signal_text=(f'SIGNAL {direction}\n\n{SPOT_SYMBOL} Futures\nTimeframe: 5m\nStart: {kyiv(start["ts"])} Kyiv time\nTrigger: candle 6\n\nSignal only - no automatic trading.\n\nТрейдер Василь Павлів\n@vasylpavliv\nhttps://t.me/vasylpavliv')
+        signal_text=(f'SIGNAL {direction}\n\n{SPOT_SYMBOL} Futures\nTimeframe: 5m\nStart: {kyiv(start["ts"])} Kyiv time\nTrigger: candle 9\n\nSignal only - no automatic trading.\n\nТрейдер Василь Павлів\n@vasylpavliv\nhttps://t.me/vasylpavliv')
         signal_group_text=(f'SIGNAL {direction}\n\n{SPOT_SYMBOL} Futures\nTimeframe: 5m\nStart: {kyiv(start["ts"])} Kyiv time\n\nSignal only - no automatic trading.\n\nТрейдер Василь Павлів\n@vasylpavliv\nhttps://t.me/vasylpavliv')
         tg(signal_text, signal_group_text)
         self.pending.append({'start_ts':start['ts'], 'trigger_idx':idx, 'direction':direction})
