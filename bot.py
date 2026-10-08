@@ -175,18 +175,22 @@ class Engine:
             return 0
         known=set(self.c)
         new=[x for x in closed if x['ts'] not in known]
-        for x in new:
+        # Process each new candle while it is still present in history. Previously,
+        # history was trimmed to 150 candles before evaluation, so older entries in
+        # a multi-candle catch-up batch could be removed and keys.index(ts) crashed.
+        processed=0
+        for x in sorted(new, key=lambda item:item['ts']):
             self.c[x['ts']]=x
-        self.c=OrderedDict(sorted(self.c.items()))
-        while len(self.c)>150:
-            self.c.popitem(last=False)
-        for x in new:
+            self.c=OrderedDict(sorted(self.c.items()))
             self.evaluate(x['ts'])
+            processed += 1
+            while len(self.c)>150:
+                self.c.popitem(last=False)
         if new:
             self.state['pending']=self.pending
-            self.state['last_processed_5m']=new[-1]['ts']
+            self.state['last_processed_5m']=max(x['ts'] for x in new)
             save_state(self.state, self.state_file)
-        return len(new)
+        return processed
 
     def evaluate(self, ts):
         keys=list(self.c)
