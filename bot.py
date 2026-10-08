@@ -8,7 +8,11 @@ from dotenv import load_dotenv
 load_dotenv()
 TOKEN=os.getenv('TELEGRAM_BOT_TOKEN','').strip()
 CHAT_IDS=[x.strip() for x in os.getenv('TELEGRAM_CHAT_ID','').split(',') if x.strip()]
-SYMBOL=os.getenv('MEXC_SYMBOL','ETH_USDT').strip().upper()
+SYMBOL_RAW=os.getenv('MEXC_SYMBOL','ETH_USDT').strip().upper()
+# This engine processes one symbol. If Railway contains a comma-separated list
+# from an older multi-symbol setup, use the first symbol instead of sending the
+# whole list as one invalid MEXC symbol.
+SYMBOL=next((x.strip() for x in SYMBOL_RAW.split(',') if x.strip()), 'ETH_USDT')
 POLL=int(os.getenv('POLL_SECONDS','15'))
 STATE_FILE=os.getenv('STATE_FILE','state.json')
 FUTURES_URL=f'https://api.mexc.com/api/v1/contract/kline/{SYMBOL}'
@@ -189,7 +193,7 @@ class Engine:
         log.info('PRE-SIGNAL | start=%s %s | live trigger=%s %s | ~2m left', utc(start['ts']), sc, utc(target_ts), trig)
         group_text=('**Всі готові?**\n'
                      '**Скоро дам СИГНАЛ!**\n\n'
-                     'ETHUSDT Futures\n'
+                     f'{SPOT_SYMBOL} Futures\n'
                      'Timeframe: 5m\n\n'
                      '⚠️ Сигнал буде тільки після закриття свічки.')
         # Pre-signal announcement is intended for the Telegram group only.
@@ -230,10 +234,10 @@ class Engine:
             want='GREEN' if p['direction']=='LONG' else 'RED'
             if color(cur)==want:
                 log.info('RESULT WIN | %s | start=%s | control=%d', p['direction'], utc(p['start_ts']), rel)
-                tg(f'WIN\nETHUSDT Futures\nDirection: {p["direction"]}\nControl candle: {rel}/7\n\nТрейдер Василь Павлів\n@vasylpavliv\nhttps://t.me/vasylpavliv')
+                tg(f'WIN\n{SPOT_SYMBOL} Futures\nDirection: {p["direction"]}\nControl candle: {rel}/7\n\nТрейдер Василь Павлів\n@vasylpavliv\nhttps://t.me/vasylpavliv')
             elif rel>=7:
                 log.info('RESULT LOSS | %s | start=%s', p['direction'], utc(p['start_ts']))
-                tg(f'LOSS\nETHUSDT Futures\nDirection: {p["direction"]}\nNo confirmation in candles 7-13\n\nТрейдер Василь Павлів\n@vasylpavliv\nhttps://t.me/vasylpavliv')
+                tg(f'LOSS\n{SPOT_SYMBOL} Futures\nDirection: {p["direction"]}\nNo confirmation in candles 7-13\n\nТрейдер Василь Павлів\n@vasylpavliv\nhttps://t.me/vasylpavliv')
             else:
                 keep.append(p)
         self.pending=keep
@@ -266,8 +270,8 @@ class Engine:
         if any(p['start_ts']==start['ts'] for p in self.pending):
             return
         log.info('SIGNAL %s | start=%s %s | trigger=%s %s', direction, utc(start['ts']), sc, utc(ts), trig)
-        signal_text=(f'SIGNAL {direction}\n\nETHUSDT Futures\nTimeframe: 5m\nStart: {kyiv(start["ts"])} Kyiv time\nTrigger: candle 6\n\nSignal only - no automatic trading.\n\nТрейдер Василь Павлів\n@vasylpavliv\nhttps://t.me/vasylpavliv')
-        signal_group_text=(f'SIGNAL {direction}\n\nETHUSDT Futures\nTimeframe: 5m\nStart: {kyiv(start["ts"])} Kyiv time\n\nSignal only - no automatic trading.\n\nТрейдер Василь Павлів\n@vasylpavliv\nhttps://t.me/vasylpavliv')
+        signal_text=(f'SIGNAL {direction}\n\n{SPOT_SYMBOL} Futures\nTimeframe: 5m\nStart: {kyiv(start["ts"])} Kyiv time\nTrigger: candle 6\n\nSignal only - no automatic trading.\n\nТрейдер Василь Павлів\n@vasylpavliv\nhttps://t.me/vasylpavliv')
+        signal_group_text=(f'SIGNAL {direction}\n\n{SPOT_SYMBOL} Futures\nTimeframe: 5m\nStart: {kyiv(start["ts"])} Kyiv time\n\nSignal only - no automatic trading.\n\nТрейдер Василь Павлів\n@vasylpavliv\nhttps://t.me/vasylpavliv')
         tg(signal_text, signal_group_text)
         self.pending.append({'start_ts':start['ts'], 'trigger_idx':idx, 'direction':direction})
 
@@ -275,10 +279,10 @@ state=load_state()
 engine=Engine(state)
 
 def main():
-    log.info('Started ETH_USDT 5m signal bot v4-fixed (MEXC REST)')
+    log.info('Started %s 5m signal bot v4-fixed (MEXC REST)', SYMBOL)
     log.info('Config: poll=%ss, chats=%d, token_configured=%s', POLL, len(CHAT_IDS), bool(TOKEN))
     if TOKEN and CHAT_IDS:
-        tg('BOT ONLINE\nETHUSDT Futures\nSignal bot is active.\nThis test confirms Telegram delivery to all configured chats.')
+        tg(f'BOT ONLINE\n{SPOT_SYMBOL} Futures\nSignal bot is active.\nThis test confirms Telegram delivery to all configured chats.')
     last_log=0
     while True:
         try:
