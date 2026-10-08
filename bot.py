@@ -51,6 +51,10 @@ def tg(text, group_text=None):
     sent=0
     for chat_id in CHAT_IDS:
         send_text = group_text if (group_text is not None and chat_id.startswith('-')) else text
+        # A group-only pre-alert has no private-chat text; skip that chat instead
+        # of sending an empty Telegram message.
+        if not send_text or not send_text.strip():
+            continue
         delivered=False
         for attempt in range(2):
             try:
@@ -317,7 +321,7 @@ state=load_state()
 engine=Engine(state)
 
 def main():
-    log.info('Started %s 5m signal bot v4-fixed (MEXC REST)', SYMBOL)
+    log.info('Started %s 5m signal bot v10-fixed (MEXC REST)', SYMBOL)
     log.info('Config: poll=%ss, chats=%d, token_configured=%s', POLL, len(CHAT_IDS), bool(TOKEN))
     if TOKEN and CHAT_IDS:
         tg(f'BOT ONLINE\n{SPOT_SYMBOL} Futures\nSignal bot is active.\nThis test confirms Telegram delivery to all configured chats.')
