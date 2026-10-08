@@ -11,7 +11,7 @@ CHAT_IDS=[x.strip() for x in os.getenv('TELEGRAM_CHAT_ID','').split(',') if x.st
 SYMBOL=os.getenv('MEXC_SYMBOL','ETH_USDT').strip().upper()
 POLL=int(os.getenv('POLL_SECONDS','15'))
 STATE_FILE=os.getenv('STATE_FILE','state.json')
-URL=f'https://api.mexc.com/api/v1/contract/kline/{SYMBOL}'
+URL=f'https://contract.mexc.com/api/v1/contract/kline/{SYMBOL}'
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(levelname)s | %(message)s')
 log=logging.getLogger('eth-bot')
