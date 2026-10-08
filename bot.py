@@ -11,7 +11,8 @@ CHAT_IDS=[x.strip() for x in os.getenv('TELEGRAM_CHAT_ID','7728565803,-555776039
 SYMBOL=os.getenv('BYBIT_SYMBOL','ETHUSDT').strip().upper()
 POLL=int(os.getenv('POLL_SECONDS','15'))
 STATE_FILE=os.getenv('STATE_FILE','state.json')
-URL='https://api.bybit.com/v5/market/kline'
+BYBIT_BASE_URL=os.getenv('BYBIT_BASE_URL','https://api.bytick.com').strip().rstrip('/')
+URL=f'{BYBIT_BASE_URL}/v5/market/kline'
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(levelname)s | %(message)s')
 log=logging.getLogger('eth-bot')
@@ -63,7 +64,7 @@ def fetch():
     r=requests.get(
         URL,
         params={'category':'linear', 'symbol':SYMBOL, 'interval':'5', 'limit':300},
-        headers={'Cache-Control':'no-cache', 'Pragma':'no-cache', 'User-Agent':'ETHUSDT-5m-Signal-Bot/1.0'},
+        headers={'Cache-Control':'no-cache', 'Pragma':'no-cache', 'User-Agent':'Mozilla/5.0 (Railway; ETHUSDT-5m-Signal-Bot)'},
         timeout=15
     )
     r.raise_for_status()
