@@ -209,10 +209,13 @@ class Engine:
         for x in new:
             self.c[x['ts']]=x
         self.c=OrderedDict(sorted(self.c.items()))
-        while len(self.c)>150:
-            self.c.popitem(last=False)
+        # Evaluate newly arrived candles before trimming history.
+        # This prevents a batch of >150 unseen candles from removing an
+        # earlier new candle and causing keys.index(ts) to fail.
         for x in new:
             self.evaluate(x['ts'])
+        while len(self.c)>150:
+            self.c.popitem(last=False)
         if new:
             self.state['pending']=self.pending
             self.state['last_processed_5m']=new[-1]['ts']
